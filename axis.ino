@@ -26,6 +26,7 @@ const float SERVO_SPEED_DPS = 120.0f;  // degrees/sec
 
 const unsigned long INPUT_UPDATE_MS = 20;
 const unsigned long SERVO_UPDATE_MS = 20;
+const int MAX_CATCH_UP_STEPS = 4;
 
 const float BASE_MIN_ANGLE = 0.0f;
 const float BASE_MAX_ANGLE = 180.0f;
@@ -49,10 +50,29 @@ float servoElbow = 90.0f;
 unsigned long lastInputUpdate = 0;
 unsigned long lastServoUpdate = 0;
 
+int lastBasePulse = -1;
+int lastShoulderPulse = -1;
+int lastElbowPulse = -1;
+
 void setangle(int channel, float angle) {
   angle = constrain(angle, 0.0f, 180.0f);
   int pulse = SERVOMIN + ((angle / 180.0f) * (SERVOMAX - SERVOMIN));
-  pwm.setPWM(channel, 0, pulse);
+
+  int *lastPulse = nullptr;
+  if (channel == 15) {
+    lastPulse = &lastBasePulse;
+  } else if (channel == 14) {
+    lastPulse = &lastShoulderPulse;
+  } else if (channel == 13) {
+    lastPulse = &lastElbowPulse;
+  }
+
+  if (lastPulse == nullptr || *lastPulse != pulse) {
+    pwm.setPWM(channel, 0, pulse);
+    if (lastPulse != nullptr) {
+      *lastPulse = pulse;
+    }
+  }
 }
 
 float applyDeadzone(int value) {
@@ -143,9 +163,10 @@ void setup() {
 void loop() {
   unsigned long now = millis();
 
-  if (now - lastInputUpdate >= INPUT_UPDATE_MS) {
-    float dt = (now - lastInputUpdate) / 1000.0f;
-    lastInputUpdate = now;
+  int inputSteps = 0;
+  while (now - lastInputUpdate >= INPUT_UPDATE_MS && inputSteps < MAX_CATCH_UP_STEPS) {
+    lastInputUpdate += INPUT_UPDATE_MS;
+    float dt = INPUT_UPDATE_MS / 1000.0f;
 
     int xRead = analogRead(xin);
     int yRead = analogRead(yin);
@@ -173,11 +194,14 @@ void loop() {
     Serial.print(xRead);
     Serial.print(" || yval: ");
     Serial.println(yRead);
+
+    inputSteps++;
   }
 
-  if (now - lastServoUpdate >= SERVO_UPDATE_MS) {
-    float dt = (now - lastServoUpdate) / 1000.0f;
-    lastServoUpdate = now;
+  int servoSteps = 0;
+  while (now - lastServoUpdate >= SERVO_UPDATE_MS && servoSteps < MAX_CATCH_UP_STEPS) {
+    lastServoUpdate += SERVO_UPDATE_MS;
+    float dt = SERVO_UPDATE_MS / 1000.0f;
 
     float maxServoStep = SERVO_SPEED_DPS * dt;
 
@@ -188,5 +212,7 @@ void loop() {
     setangle(15, constrain(servoBase, BASE_MIN_ANGLE, BASE_MAX_ANGLE));
     setangle(14, constrain(servoShoulder, SHOULDER_MIN_ANGLE, SHOULDER_MAX_ANGLE));
     setangle(13, constrain(servoElbow, ELBOW_MIN_ANGLE, ELBOW_MAX_ANGLE));
+
+    servoSteps++;
   }
 }
